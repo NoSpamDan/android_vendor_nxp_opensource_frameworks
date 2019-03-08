@@ -26,40 +26,33 @@ import android.nfc.cardemulation.NQAidGroup;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
 import android.nfc.cardemulation.OffHostApduService;
-import android.content.ComponentName;
-import android.content.Context;
-import android.content.pm.PackageManager;
+import android.os.Parcel;
+import android.os.Parcelable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.BitmapDrawable;
+import java.util.ArrayList;
+import java.util.HashMap;
+import android.util.Log;
+import android.util.Xml;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.content.res.Resources;
-import android.content.res.Resources.NotFoundException;
-import android.content.res.TypedArray;
 import android.content.res.XmlResourceParser;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.BitmapDrawable;
-import android.os.Parcel;
-import android.os.Parcelable;
-import android.os.ResultReceiver;
-import android.util.AttributeSet;
-import android.util.Log;
-import android.util.Xml;
-import android.graphics.Bitmap;
 import com.nxp.nfc.NxpConstants;
-
+import java.io.IOException;
+import android.content.pm.PackageManager;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 import org.xmlpull.v1.XmlSerializer;
-
-import java.io.FileDescriptor;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
+import android.content.res.Resources;
+import android.content.res.Resources.NotFoundException;
+import android.util.AttributeSet;
 import java.util.Map;
-import java.io.File;
-import java.io.FileOutputStream;
+import android.graphics.Bitmap;
+import java.io.FileDescriptor;
+import java.util.List;
+import java.io.PrintWriter;
+import android.content.res.TypedArray;
 import android.graphics.BitmapFactory;
 /**
  * @hide
@@ -87,10 +80,8 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
      */
     static final String NXP_NFC_EXT_META_DATA =
             "com.nxp.nfc.extensions";
-    /**
-     * The name of the meta-data element that contains
-     * nxp extended SE information about off host service.
-     */
+
+
     static final String GSMA_EXT_META_DATA =
             "com.gsma.services.nfc.extensions";
     /**
@@ -114,6 +105,7 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
     final HashMap<String, NQAidGroup> mDynamicNQAidGroups;
 
     final HashMap<String, Nfcid2Group> mNfcid2CategoryToGroup;
+
     /**
     * The Drawable of the service banner specified by the Application Dynamically to be stored as byteArray.
     */
@@ -123,9 +115,6 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
      * This says whether the Application can modify the AIDs or not.
      */
     final boolean mModifiable;
-    /**
-    * This field is to control non-aid based routing introduced by GSMA
-    */
     boolean mAidSupport = true;
 
     /**
@@ -141,20 +130,10 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
     /**
       * nxp se extension
       */
-    final ESeInfo mSeExtension;
+    ESeInfo mSeExtension;
     final FelicaInfo mFelicaExtension;
 
 
-    static ArrayList<AidGroup> nqAidGroups2AidGroups(ArrayList<NQAidGroup> nqAidGroup) {
-        ArrayList<AidGroup> aidGroups = new ArrayList<AidGroup>();
-        if(nqAidGroup != null) {
-            for(NQAidGroup nqag : nqAidGroup) {
-                AidGroup ag = nqag.createAidGroup();
-                aidGroups.add(ag);
-            }
-        }
-        return aidGroups;
-    }
 
     /**
      * @hide
@@ -166,7 +145,16 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
             ArrayList<Nfcid2Group> nfcid2Groups, byte[] banner,boolean modifiable) {
         super(info, onHost, description, nqAidGroups2AidGroups(staticNQAidGroups), nqAidGroups2AidGroups(dynamicNQAidGroups),
             requiresUnlock, bannerResource, uid, settingsActivityName);
-
+        if(banner != null) {
+            this.mByteArrayBanner = banner;
+        } else {
+            this.mByteArrayBanner = null;
+        }
+        this.mModifiable = modifiable;
+        this.mServiceState = NxpConstants.SERVICE_STATE_ENABLING;
+        this.mNfcid2Groups = new ArrayList<Nfcid2Group>();
+        this.mNfcid2s = new ArrayList<String>();
+        this.mNfcid2CategoryToGroup = new HashMap<String, Nfcid2Group>();
         this.mStaticNQAidGroups = new HashMap<String, NQAidGroup>();
         this.mDynamicNQAidGroups = new HashMap<String, NQAidGroup>();
         if(staticNQAidGroups != null) {
@@ -179,12 +167,6 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
                 this.mDynamicNQAidGroups.put(nqAidGroup.getCategory(), nqAidGroup);
             }
         }
-        this.mByteArrayBanner = banner;
-        this.mModifiable = modifiable;
-        this.mNfcid2Groups = new ArrayList<Nfcid2Group>();
-        this.mNfcid2s = new ArrayList<String>();
-        this.mNfcid2CategoryToGroup = new HashMap<String, Nfcid2Group>();
-        this.mServiceState = NxpConstants.SERVICE_STATE_ENABLING;
         if(nfcid2Groups != null) {
             for (Nfcid2Group nfcid2Group : nfcid2Groups) {
                 this.mNfcid2Groups.add(nfcid2Group);
@@ -270,7 +252,7 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
             mNfcid2s = new ArrayList<String>();
 
             final int depth = parser.getDepth();
-            NQAidGroup.ApduPatternGroup currApduPatternGroup = null;
+            NQAidGroup.ApduPatternGroup currNQApduPatternGroup = null;
             Nfcid2Group currentNfcid2Group = null;
 
             // Parsed values for the current AID group
@@ -278,23 +260,23 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
                     && eventType != XmlPullParser.END_DOCUMENT) {
                 tagName = parser.getName();
                 if (!onHost && eventType == XmlPullParser.START_TAG && "apdu-pattern-group".equals(tagName) &&
-                    currApduPatternGroup == null) {
+                    currNQApduPatternGroup == null) {
                     Log.e(TAG, "apdu-pattern-group");
                     /*final TypedArray groupAttrs = res.obtainAttributes(attrs,
                             com.android.internal.R.styleable.ApduPatternGroup);
                     String groupDescription = groupAttrs.getString(
                             com.android.internal.R.styleable.ApduPatternGroup_description);
-                    NQAidGroup aidGroup = mStaticNQAidGroups.get(CardEmulation.CATEGORY_OTHER);
-                    currApduPatternGroup = new NQAidGroup.ApduPatternGroup(groupDescription);
+                    NQAidGroup nqAidGroup = mStaticNQAidGroups.get(CardEmulation.CATEGORY_OTHER);
+                    currNQApduPatternGroup = new NQAidGroup.ApduPatternGroup(groupDescription);
                     groupAttrs.recycle();*/
                 } else if (!onHost && eventType == XmlPullParser.END_TAG && "apdu-pattern-group".equals(tagName) &&
-                    currApduPatternGroup != null) {
-                    if(currApduPatternGroup.getApduPattern().size() > 0x00) {
-                        mStaticNQAidGroups.get(CardEmulation.CATEGORY_OTHER).addApduGroup(currApduPatternGroup);
+                    currNQApduPatternGroup != null) {
+                    if(currNQApduPatternGroup.getApduPattern().size() > 0x00) {
+                        mStaticNQAidGroups.get(CardEmulation.CATEGORY_OTHER).addApduGroup(currNQApduPatternGroup);
                     }
                     Log.e(TAG, "apdu-pattern-group end");
                 } else if (!onHost && eventType == XmlPullParser.START_TAG && "apdu-pattern-filter".equals(tagName) &&
-                    currApduPatternGroup != null) {
+                    currNQApduPatternGroup != null) {
                     /*
                     final TypedArray a = res.obtainAttributes(attrs,
                             com.android.internal.R.styleable.ApduPatternFilter);
@@ -313,7 +295,7 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
                     Log.e(TAG, "valid apdu pattern"+ reference_data+mask+description);
 
                     a.recycle();
-                    */
+                                        */
                 } else if (eventType == XmlPullParser.START_TAG && "nfcid2-group".equals(tagName) &&
                         currentNfcid2Group == null) {
                     final TypedArray groupAttrs = res.obtainAttributes(attrs,
@@ -441,7 +423,13 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
                 extParser.close();
             }
         }else {
-            mSeExtension = new ESeInfo(-1, 0);
+            if(!onHost) {
+                Log.e(TAG, "SE extension not present, Setting default offhost seID");
+                mSeExtension = new ESeInfo(SECURE_ELEMENT_ROUTE_UICC, 0);
+            }
+            else {
+                mSeExtension = new ESeInfo(-1, 0);
+            }
             mFelicaExtension = new FelicaInfo(null, null);
         }
         if (nfcSeExtParser != null)
@@ -451,7 +439,6 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
                 final int depth = nfcSeExtParser.getDepth();
                 String seName = null;
                 mAidSupport = true;
-
                 while (eventType != XmlPullParser.START_TAG && eventType != XmlPullParser.END_DOCUMENT) {
                     eventType = nfcSeExtParser.next();
                 }
@@ -463,9 +450,7 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
                 while (((eventType = nfcSeExtParser.next()) != XmlPullParser.END_TAG || nfcSeExtParser.getDepth() > depth)
                         && eventType != XmlPullParser.END_DOCUMENT) {
                     tagName = nfcSeExtParser.getName();
-
                     if (eventType == XmlPullParser.START_TAG && "se-id".equals(tagName) ) {
-                        // Get name of eSE
                         seName = nfcSeExtParser.getAttributeValue(null, "name");
                         if (seName == null  || (!seName.equalsIgnoreCase(SECURE_ELEMENT_ESE) && !seName.equalsIgnoreCase(SECURE_ELEMENT_UICC)
                                 && !seName.equalsIgnoreCase(SECURE_ELEMENT_UICC2)) ) {
@@ -473,15 +458,32 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
                         }
                     }
                     if (eventType == XmlPullParser.START_TAG && "AID-based".equals(tagName) ) {
-                        // Get aid support
                         mAidSupport = nfcSeExtParser.getAttributeBooleanValue(0, true);
                     }
                 }
+                Log.e(TAG, "GSMA_EXT_META_DATA not null, Secure element = " + seName);
+                int powerState = 0x3B;
+                if(seName != null) {
+                    mSeExtension = new ESeInfo(seName.equals(SECURE_ELEMENT_ESE)?SECURE_ELEMENT_ROUTE_ESE:(seName.equals(SECURE_ELEMENT_UICC)?SECURE_ELEMENT_ROUTE_UICC:SECURE_ELEMENT_ROUTE_UICC2),powerState);
+                } else {
+                    mSeExtension = new ESeInfo(-1, 0);
+                }
+                Log.d(TAG, mSeExtension.toString());
             } finally {
                 nfcSeExtParser.close();
             }
         }
  }
+    static ArrayList<AidGroup> nqAidGroups2AidGroups(ArrayList<NQAidGroup> nqAidGroup) {
+        ArrayList<AidGroup> aidGroups = new ArrayList<AidGroup>();
+        if(nqAidGroup != null) {
+            for(NQAidGroup nqag : nqAidGroup) {
+                AidGroup ag = nqag.createAidGroup();
+                aidGroups.add(ag);
+            }
+        }
+        return aidGroups;
+    }
 
     public void writeToXml(XmlSerializer out) throws IOException {
         out.attribute(null, "description", mDescription);
@@ -500,12 +502,27 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
         }
     }
 
-    public ComponentName getComponent() {
-        return new ComponentName(mService.serviceInfo.packageName,
-                mService.serviceInfo.name);
-    }
     public ResolveInfo getResolveInfo() {
         return mService;
+    }
+    public ArrayList<String> getAids() {
+        final ArrayList<String> aids = new ArrayList<String>();
+        for (NQAidGroup group : getNQAidGroups()) {
+            aids.addAll(group.getAids());
+        }
+        return aids;
+    }
+    public ArrayList<NQAidGroup> getNQAidGroups() {
+        final ArrayList<NQAidGroup> groups = new ArrayList<NQAidGroup>();
+        for (Map.Entry<String, NQAidGroup> entry : mDynamicNQAidGroups.entrySet()) {
+            groups.add(entry.getValue());
+        }
+        for (Map.Entry<String, NQAidGroup> entry : mStaticNQAidGroups.entrySet()) {
+            if (!mDynamicNQAidGroups.containsKey(entry.getKey())) {
+                groups.add(entry.getValue());
+            }
+        }
+        return groups;
     }
 
     /**
@@ -611,9 +628,6 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
         return aidTotalNum;
     }
 
-    public ArrayList<String> getNfcid2s() {
-        return mNfcid2s;
-    }
 
     /**
      * Returns a consolidated list of AID groups
@@ -623,26 +637,12 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
      * for that category.
      * @return List of AIDs registered by the service
      */
-    public ArrayList<NQAidGroup> getNQAidGroups() {
-        final ArrayList<NQAidGroup> groups = new ArrayList<NQAidGroup>();
-        for (Map.Entry<String, NQAidGroup> entry : mDynamicNQAidGroups.entrySet()) {
-            groups.add(entry.getValue());
-        }
-        for (Map.Entry<String, NQAidGroup> entry : mStaticNQAidGroups.entrySet()) {
-            if (!mDynamicNQAidGroups.containsKey(entry.getKey())) {
-                // Consolidate AID groups - don't return static ones
-                // if a dynamic group exists for the category.
-                groups.add(entry.getValue());
-            }
-        }
-        return groups;
-    }
-
-    /**@hide */
     public ArrayList<NQAidGroup> getStaticNQAidGroups() {
         final ArrayList<NQAidGroup> groups = new ArrayList<NQAidGroup>();
 
         for (Map.Entry<String, NQAidGroup> entry : mStaticNQAidGroups.entrySet()) {
+                // Consolidate AID groups - don't return static ones
+                // if a dynamic group exists for the category.
                 groups.add(entry.getValue());
         }
         return groups;
@@ -651,10 +651,16 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
     /**@hide */
     public ArrayList<NQAidGroup> getDynamicNQAidGroups() {
         final ArrayList<NQAidGroup> groups = new ArrayList<NQAidGroup>();
+
         for (Map.Entry<String, NQAidGroup> entry : mDynamicNQAidGroups.entrySet()) {
-            groups.add(entry.getValue());
+                groups.add(entry.getValue());
         }
         return groups;
+    }
+
+    /**@hide */
+    public ArrayList<String> getNfcid2s() {
+        return mNfcid2s;
     }
 
     public ArrayList<Nfcid2Group> getNfcid2Groups() {
@@ -677,7 +683,6 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
         Bitmap bitmap = BitmapFactory.decodeByteArray(mByteArrayBanner, 0, mByteArrayBanner.length);
         return bitmap;
     }
-
     public void setOrReplaceDynamicNQAidGroup(NQAidGroup nqAidGroup) {
         super.setOrReplaceDynamicAidGroup(nqAidGroup);
         mDynamicNQAidGroups.put(nqAidGroup.getCategory(), nqAidGroup);
@@ -700,7 +705,7 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
             if(mBannerResourceId == -1) {
                 banner = new BitmapDrawable((Bitmap)getBitmapBanner());
             } else {
-                banner = res.getDrawable(mBannerResourceId,null);
+                banner = res.getDrawable(mBannerResourceId, null);
             }
             return banner;
         } catch (NotFoundException e) {
@@ -760,17 +765,9 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
     }
 
     @Override
-    public int hashCode() {
-        return getComponent().hashCode();
-    }
 
 
-    @Override
-    public int describeContents() {
-        return 0;
-    }
 
-    @Override
     public void writeToParcel(Parcel dest, int flags) {
         mService.writeToParcel(dest, flags);
         dest.writeString(mDescription);
@@ -831,7 +828,7 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
             boolean modifiable = source.readInt() != 0;
             NQApduServiceInfo service = new NQApduServiceInfo(info, onHost, description, staticNQAidGroups,
                     dynamicNQAidGroups, requiresUnlock, bannerResource, uid,
-                    settingsActivityName, seExtension, nfcid2Groups, byteArrayBanner,modifiable);
+                    settingsActivityName, seExtension, nfcid2Groups, byteArrayBanner ,modifiable);
             service.setServiceState(CardEmulation.CATEGORY_OTHER, source.readInt());
             return service;
         }
@@ -956,23 +953,7 @@ public class NQApduServiceInfo extends ApduServiceInfo implements Parcelable {
     }
 
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
-        pw.println("    " + getComponent() +
-                " (Description: " + getDescription() + ")");
-        pw.println("    Static AID groups:");
-        for (NQAidGroup group : mStaticNQAidGroups.values()) {
-            pw.println("        Category: " + group.getCategory());
-            for (String aid : group.getAids()) {
-                pw.println("            AID: " + aid);
-            }
-        }
-        pw.println("    Dynamic AID groups:");
-        for (NQAidGroup group : mDynamicNQAidGroups.values()) {
-            pw.println("        Category: " + group.getCategory());
-            for (String aid : group.getAids()) {
-                pw.println("            AID: " + aid);
-            }
-        }
-        pw.println("    Settings Activity: " + mSettingsActivityName);
+            super.dump(fd,pw,args);
         pw.println("    Routing Destination: " + (mOnHost ? "host" : "secure element"));
         if (hasCategory(CardEmulation.CATEGORY_OTHER)) {
             pw.println("    Service State: " + serviceStateToString(mServiceState));
